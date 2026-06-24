@@ -77,6 +77,8 @@
             user-select: none;
             transition: background 0.1s;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            min-width: 0;          /* 允许格子收缩到内容宽度以下 */
+            overflow: hidden;      /* 裁剪溢出内容，避免撑大容器 */
         }
         .square.light {
             background: #f0d9b5;
@@ -199,10 +201,12 @@
         /* 移动端适配 */
         @media (max-width: 480px) {
             .game-container {
-                padding: 16px;
+                padding: 10px 12px;
             }
             .square {
-                font-size: 2rem;
+                font-size: 1.5rem;
+                overflow: hidden;
+                white-space: nowrap;
             }
             .status-area {
                 flex-direction: column;
