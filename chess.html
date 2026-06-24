@@ -464,39 +464,49 @@
                 }
             }
 
-            // ---------- 初始化 PeerJS ----------
-            function initPeer() {
-                peer = new Peer(undefined, {
-                    debug: 0,
-                });
+            // ---------- 生成短 ID（6位字母数字，方便口述） ----------
+function generateShortId() {
+    // 生成 6 位大写字母+数字，例如 "A3F9K2"
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
 
-                peer.on('open', (id) => {
-                    myId = id;
-                    myIdInput.value = id;
-                    statusText.textContent = '🟢 已上线，等待连接...';
-                });
+// ---------- 初始化 PeerJS ----------
+function initPeer() {
+    // 自定义一个短 ID，而不是让系统随机生成 UUID
+    const myShortId = generateShortId();
+    peer = new Peer(myShortId, {
+        debug: 0,
+    });
 
-                peer.on('connection', (incomingConn) => {
-                    conn = incomingConn;
-                    setupConnection();
-                    // 发起方为白方
-                    myColor = 'w';
-                    isMyTurn = true;
-                    if (conn.open) {
-                        conn.send({ type: 'role', color: 'b' });
-                    }
-                    statusText.textContent = '🤝 已连接！你执白棋';
-                    renderBoard();
-                });
+    peer.on('open', (id) => {
+        myId = id;              // 这里拿到的 id 就是我们生成的短 ID
+        myIdInput.value = id;
+        statusText.textContent = '🟢 已上线，你的 ID: ' + id;
+    });
 
-                peer.on('error', (err) => {
-                    console.error('Peer error:', err);
-                    if (err.type === 'peer-unavailable') {
-                        statusText.textContent = '❌ 对方ID无效或离线';
-                    }
-                });
-            }
+    peer.on('connection', (incomingConn) => {
+        conn = incomingConn;
+        setupConnection();
+        myColor = 'w';
+        isMyTurn = true;
+        if (conn.open) {
+            conn.send({ type: 'role', color: 'b' });
+        }
+        statusText.textContent = '🤝 已连接！你执白棋';
+        renderBoard();
+    });
 
+    peer.on('error', (err) => {
+        console.error('Peer error:', err);
+        if (err.type === 'peer-unavailable') {
+            statusText.textContent = '❌ 对方ID无效或离线';
+        }
+        // 如果提示 ID 被占用（极小概率），刷新页面即可生成新 ID
+        if (err.type === 'unavailable-id') {
+            statusText.textContent = '⚠️ 该ID已被占用，请刷新页面重试';
+        }
+    });
+}
             // ---------- 设置连接 ----------
             function setupConnection() {
                 if (!conn) return;
