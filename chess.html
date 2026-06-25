@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>P2P 国际象棋 · 远程对弈</title>
     <!-- 引入 Chess.js 处理棋规 -->
-     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js">
     </script>
     <!-- 引入 PeerJS 简化 WebRTC 连接 -->
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js">
@@ -60,7 +60,7 @@
             grid-template-columns: repeat(8, 1fr);
             width: 100%;
             aspect-ratio: 1/1;
-            max-width: 640px;     
+            max-width: 640px;
             border: 4px solid #b58863;
             border-radius: 6px;
             overflow: hidden;
@@ -77,8 +77,8 @@
             user-select: none;
             transition: background 0.1s;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            min-width: 0;          /* 允许格子收缩到内容宽度以下 */
-            overflow: hidden;      /* 裁剪溢出内容 */
+            min-width: 0;
+            overflow: hidden;
         }
         .square.light {
             background: #f0d9b5;
@@ -226,7 +226,7 @@
 <body>
     <div class="game-container">
         <h2>♚ 远程对弈</h2>
-        <div class="sub">基于 WebRTC</div>
+        <div class="sub">基于 WebRTC · 自动重连</div>
 
         <!-- 棋盘 -->
         <div class="board-wrapper">
@@ -272,7 +272,7 @@
             let selectedSquare = null;
             let validMoves = [];
             let boardFlipped = false;
-            let myColor = 'w'; // 'w' 或 'b'，由连接角色决定
+            let myColor = ''; // 'w' 或 'b'，由连接角色决定
             let isMyTurn = false;
             let gameOver = false;
 
@@ -280,6 +280,11 @@
             let peer = null;
             let conn = null;
             let myId = '';
+
+            // ---------- 重连相关（新增） ----------
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 5;
+            let targetPeerId = ''; // 保存对方 ID，用于重连
 
             // DOM 元素
             const myIdInput = document.getElementById('my-id');
@@ -293,7 +298,6 @@
             function renderBoard() {
                 const board = chess.board();
                 boardElement.innerHTML = '';
-                // 根据 flipped 决定遍历顺序
                 const rows = boardFlipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
                 for (let r of rows) {
                     for (let c = 0; c < 8; c++) {
@@ -305,21 +309,18 @@
                         square.dataset.square = squareName;
 
                         const piece = board[r][col];
-                            if (piece) {
-                            // 使用 chess.js 的 piece 对象统一接口
-                            const symbol = piece.symbol || piece.type; // 兼容新旧版
+                        if (piece) {
+                            const symbol = piece.symbol || piece.type;
                             const unicode = {
-                            'w': { 'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙' },
-                            'b': { 'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟' }
+                                'w': { 'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙' },
+                                'b': { 'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟' }
                             };
-                        square.textContent = unicode[piece.color][symbol.toUpperCase()] || '';
+                            square.textContent = unicode[piece.color][symbol.toUpperCase()] || '';
                         }
 
-                        // 高亮选中的格子
                         if (selectedSquare === squareName) {
                             square.classList.add('selected');
                         }
-                        // 高亮合法走法
                         if (validMoves.includes(squareName)) {
                             square.classList.add('valid-move');
                         }
@@ -356,26 +357,20 @@
             // ---------- 走棋逻辑 ----------
             function onSquareClick(squareName) {
                 if (gameOver) return;
-                if (!isMyTurn) {
-                    // 简单提示，但不影响体验
-                    return;
-                }
+                if (!isMyTurn) return;
 
-                // 如果点击的是已经选中的格子 -> 取消选中
                 if (selectedSquare === squareName) {
                     clearSelection();
                     renderBoard();
                     return;
                 }
 
-                // 如果点击的是合法走法目标 -> 走棋
                 if (validMoves.includes(squareName)) {
-                    const move = { from: selectedSquare, to: squareName, promotion: 'q' }; // 默认升变为后
+                    const move = { from: selectedSquare, to: squareName, promotion: 'q' };
                     const result = chess.move(move);
                     if (result) {
                         clearSelection();
                         renderBoard();
-                        // 发送走法给对方
                         if (conn && conn.open) {
                             conn.send({
                                 type: 'move',
@@ -384,30 +379,25 @@
                                 promotion: result.promotion || 'q'
                             });
                         }
-                        // 检查游戏是否结束
                         if (chess.game_over()) {
                             gameOver = true;
                             renderBoard();
                         }
                         return;
                     } else {
-                        // 走法非法，清除选中
                         clearSelection();
                         renderBoard();
                         return;
                     }
                 }
 
-                // 点击的是己方棋子 -> 选中并计算合法走法
                 const piece = chess.get(squareName);
                 if (piece && piece.color === myColor) {
                     selectedSquare = squareName;
-                    // 计算该棋子的所有合法走法
                     const moves = chess.moves({ square: squareName, verbose: true });
                     validMoves = moves.map(m => m.to);
                     renderBoard();
                 } else {
-                    // 点击空位或对方棋子 -> 清除选中
                     clearSelection();
                     renderBoard();
                 }
@@ -424,7 +414,6 @@
                 gameOver = false;
                 clearSelection();
                 renderBoard();
-                // 通知对方重置（如果连接存在）
                 if (conn && conn.open) {
                     conn.send({ type: 'reset' });
                 }
@@ -439,7 +428,6 @@
             // ---------- 处理收到的消息 ----------
             function handlePeerMessage(data) {
                 if (data.type === 'move') {
-                    // 对方走棋
                     const move = { from: data.from, to: data.to, promotion: data.promotion || 'q' };
                     const result = chess.move(move);
                     if (result) {
@@ -450,87 +438,173 @@
                             renderBoard();
                         }
                     } else {
-                        // 走法非法，可能不同步，请求重置？
                         console.warn('收到非法走法', data);
                     }
                 } else if (data.type === 'reset') {
                     resetGame();
                 } else if (data.type === 'role') {
-                    // 角色分配：先连接的为白方
-                    myColor = data.color;
-                    isMyTurn = (chess.turn() === myColor);
-                    statusText.textContent = `🎯 你执 ${myColor === 'w' ? '白' : '黑'} 棋`;
-                    renderBoard();
+                    // 只有首次连接时处理角色分配（重连时忽略）
+                    if (reconnectAttempts === 0) {
+                        myColor = data.color;
+                        isMyTurn = (chess.turn() === myColor);
+                        statusText.textContent = `🎯 你执 ${myColor === 'w' ? '白' : '黑'} 棋`;
+                        renderBoard();
+                    }
+                } else if (data.type === 'sync') {
+                    // 收到同步请求，应用 FEN
+                    try {
+                        chess.load(data.fen);
+                        clearSelection();
+                        renderBoard();
+                        statusText.textContent = '🔄 棋盘已同步';
+                        setTimeout(() => updateStatus(), 500);
+                    } catch (e) {
+                        console.warn('同步 FEN 失败', e);
+                    }
                 }
+                // ping / pong 在 conn.on('data') 中已被过滤，不会到达这里
             }
 
-            // ---------- 生成短 ID（6位字母数字，方便口述） ----------
-function generateShortId() {
-    // 生成 6 位大写字母+数字，例如 "A3F9K2"
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
+            // ---------- 生成短 ID ----------
+            function generateShortId() {
+                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            }
 
-// ---------- 初始化 PeerJS ----------
-function initPeer() {
-    const myShortId = generateShortId();   // 生成6位短ID
-    peer = new Peer(myShortId, {
-        debug: 0,
-        host: '0.peerjs.com',
-        port: 443,
-        path: '/',
-        secure: true
-    });
+            // ---------- 重连函数（新增） ----------
+            function reconnectToPeer(peerId) {
+                if (!peerId || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                    statusText.textContent = '❌ 重连失败，请刷新页面手动连接';
+                    return;
+                }
+                reconnectAttempts++;
+                statusText.textContent = `🔄 正在重连 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`;
 
-        peer.on('open', (id) => {
-            myId = id;
-            myIdInput.value = id;
-            statusText.textContent = '🟢 已上线，你的 ID: ' + id;
-    });
+                // 关闭旧连接（如果有）
+                if (conn && conn.open) conn.close();
 
-    peer.on('connection', (incomingConn) => {
-        conn = incomingConn;
-        setupConnection();
-        myColor = 'w';
-        isMyTurn = true;
-        if (conn.open) {
-            conn.send({ type: 'role', color: 'b' });
-        }
-        statusText.textContent = '🤝 已连接！你执白棋';
-        renderBoard();
-    });
+                // 重新发起连接
+                const newConn = peer.connect(peerId, { reliable: true });
+                conn = newConn;
+                setupConnection();
 
-    peer.on('error', (err) => {
-        console.error('Peer error:', err);
-        if (err.type === 'peer-unavailable') {
-            statusText.textContent = '❌ 对方ID无效或离线';
-        }
-        // 如果提示 ID 被占用（极小概率），刷新页面即可生成新 ID
-        if (err.type === 'unavailable-id') {
-            statusText.textContent = '⚠️ 该ID已被占用，请刷新页面重试';
-        }
-    });
-}
-            // ---------- 设置连接 ----------
+                // 设置超时重试
+                setTimeout(() => {
+                    if (!conn || !conn.open) {
+                        reconnectToPeer(peerId);
+                    }
+                }, 3000);
+            }
+
+            // ---------- 初始化 PeerJS ----------
+            function initPeer() {
+                const myShortId = generateShortId();
+                peer = new Peer(myShortId, {
+                    debug: 0,
+                    host: 'peerjs-server-kj4c.onrender.com',
+                    port: 443,
+                    path: '/',
+                    secure: true
+                });
+
+                peer.on('open', (id) => {
+                    myId = id;
+                    myIdInput.value = id;
+                    statusText.textContent = '🟢 已上线，你的 ID: ' + id;
+                });
+
+                peer.on('connection', (incomingConn) => {
+                    // 保存对方 ID 用于重连
+                    targetPeerId = incomingConn.peer;
+                    conn = incomingConn;
+                    // 接收方执白
+                    myColor = 'w';
+                    isMyTurn = true;
+                    setupConnection();
+
+                    // 首次连接（非重连）时发送角色信息
+                    if (reconnectAttempts === 0) {
+                        // 等待连接打开再发送
+                        const sendRole = () => {
+                            if (conn && conn.open) {
+                                conn.send({ type: 'role', color: 'b' });
+                            }
+                        };
+                        if (conn.open) {
+                            sendRole();
+                        } else {
+                            conn.on('open', sendRole);
+                        }
+                    }
+
+                    statusText.textContent = '🤝 已连接！你执白棋';
+                    renderBoard();
+                });
+
+                peer.on('error', (err) => {
+                    console.error('Peer error:', err);
+                    if (err.type === 'peer-unavailable') {
+                        statusText.textContent = '❌ 对方ID无效或离线';
+                    }
+                    if (err.type === 'unavailable-id') {
+                        statusText.textContent = '⚠️ 该ID已被占用，请刷新页面重试';
+                    }
+                });
+            }
+
+            // ---------- 设置连接（增强版） ----------
             function setupConnection() {
                 if (!conn) return;
+
+                // 处理 open 事件：心跳 + 重连同步
                 conn.on('open', () => {
-                    statusText.textContent = '📡 连接已建立';
-                    // 如果还没分配角色（作为被连接方），对方会发送 role
+                    console.log('✅ 连接已建立');
+
+                    // 如果是重连，发送当前棋盘状态让对方同步
+                    if (reconnectAttempts > 0) {
+                        const fen = chess.fen();
+                        conn.send({ type: 'sync', fen: fen });
+                        statusText.textContent = '🔄 已重连，正在同步棋盘...';
+                    }
+                    reconnectAttempts = 0; // 重置重连计数
+
+                    // 启动心跳（每 10 秒发送 ping）
+                    const heartbeat = setInterval(() => {
+                        if (conn && conn.open) {
+                            conn.send({ type: 'ping' });
+                        } else {
+                            clearInterval(heartbeat);
+                        }
+                    }, 10000);
+                    // 将 heartbeat 挂到 conn 上以便清理
+                    conn._heartbeat = heartbeat;
                 });
+
+                // 处理数据消息
                 conn.on('data', (data) => {
+                    // 忽略 ping / pong
+                    if (data.type === 'ping' || data.type === 'pong') return;
+                    // 同步消息在 handlePeerMessage 中处理
                     handlePeerMessage(data);
                 });
+
                 conn.on('close', () => {
                     statusText.textContent = '🔴 连接已断开';
+                    // 清理心跳
+                    if (conn && conn._heartbeat) {
+                        clearInterval(conn._heartbeat);
+                        conn._heartbeat = null;
+                    }
                     conn = null;
                 });
+
                 conn.on('error', (err) => {
                     console.error('Connection error:', err);
                 });
             }
 
-            // ---------- 连接到对方 ----------
+            // ---------- 连接到对方（修改：保存 targetPeerId） ----------
             function connectToPeer(peerId) {
+                targetPeerId = peerId; // 保存起来，供重连使用
                 if (!peer) {
                     statusText.textContent = '⚠️ 请等待页面初始化';
                     return;
@@ -538,21 +612,31 @@ function initPeer() {
                 if (conn && conn.open) {
                     conn.close();
                 }
-                const newConn = peer.connect(peerId, {
-                    reliable: true
-                });
+                const newConn = peer.connect(peerId, { reliable: true });
                 conn = newConn;
-                setupConnection();
-                // 被连接方为黑方
+                // 发起方执黑
                 myColor = 'b';
                 isMyTurn = false;
-                // 发送角色信息
-                conn.on('open', () => {
-                    conn.send({ type: 'role', color: 'w' });
-                    statusText.textContent = '🤝 已连接！你执黑棋';
-                    renderBoard();
-                });
-                // 如果连接立即失败
+                setupConnection();
+
+                // 首次连接（非重连）时发送角色信息
+                if (reconnectAttempts === 0) {
+                    conn.on('open', () => {
+                        if (conn && conn.open) {
+                            conn.send({ type: 'role', color: 'w' });
+                            statusText.textContent = '🤝 已连接！你执黑棋';
+                            renderBoard();
+                        }
+                    });
+                } else {
+                    // 重连时，连接建立后更新状态
+                    conn.on('open', () => {
+                        statusText.textContent = '🤝 已重连！';
+                        renderBoard();
+                    });
+                }
+
+                // 连接超时检测
                 setTimeout(() => {
                     if (conn && !conn.open) {
                         statusText.textContent = '⏳ 连接超时，请检查ID';
@@ -568,7 +652,6 @@ function initPeer() {
                         statusText.textContent = '✅ 已复制ID';
                         setTimeout(() => updateStatus(), 1500);
                     }).catch(() => {
-                        // fallback
                         myIdInput.select();
                         document.execCommand('copy');
                         statusText.textContent = '✅ 已复制ID';
@@ -588,15 +671,27 @@ function initPeer() {
             });
 
             btnCopy.addEventListener('click', copyMyId);
-
             btnReset.addEventListener('click', resetGame);
-
             btnFlip.addEventListener('click', flipBoard);
 
-            // 回车触发连接
             peerIdInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     btnConnect.click();
+                }
+            });
+
+            // ---------- 页面可见性变化监听（切后台自动重连） ----------
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    // 页面变为可见，检查连接状态
+                    if (conn && !conn.open) {
+                        console.log('📡 页面可见，但连接已断开，尝试重连...');
+                        if (targetPeerId) {
+                            reconnectToPeer(targetPeerId);
+                        } else {
+                            statusText.textContent = '⚠️ 无对方 ID，无法重连';
+                        }
+                    }
                 }
             });
 
@@ -605,9 +700,12 @@ function initPeer() {
             renderBoard();
             statusText.textContent = '⏳ 初始化...';
 
-            // 清理（虽然不是必须，但好习惯）
+            // 清理资源
             window.addEventListener('beforeunload', () => {
-                if (conn) conn.close();
+                if (conn) {
+                    if (conn._heartbeat) clearInterval(conn._heartbeat);
+                    conn.close();
+                }
                 if (peer) peer.destroy();
             });
 
