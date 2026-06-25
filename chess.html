@@ -472,16 +472,19 @@ function generateShortId() {
 
 // ---------- 初始化 PeerJS ----------
 function initPeer() {
-    // 自定义一个短 ID，而不是让系统随机生成 UUID
-    const myShortId = generateShortId();
+    const myShortId = generateShortId();   // 生成6位短ID
     peer = new Peer(myShortId, {
         debug: 0,
+        host: 'peerjs-server-kj4c.onrender.com',
+        port: 443,
+        path: '/',
+        secure: true
     });
 
-    peer.on('open', (id) => {
-        myId = id;              // 这里拿到的 id 就是我们生成的短 ID
-        myIdInput.value = id;
-        statusText.textContent = '🟢 已上线，你的 ID: ' + id;
+        peer.on('open', (id) => {
+            myId = id;
+            myIdInput.value = id;
+            statusText.textContent = '🟢 已上线，你的 ID: ' + id;
     });
 
     peer.on('connection', (incomingConn) => {
